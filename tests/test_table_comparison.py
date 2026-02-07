@@ -125,3 +125,29 @@ def test_compare_rtf_tables_compares_loaded_rtf_fixtures(test_data_dir: Path) ->
     result = compare_rtf_tables(left_path, right_path)
 
     assert result.category == "identical"
+
+
+def test_compare_rtf_tables_detects_structure_difference_for_columns(
+    test_data_dir: Path,
+) -> None:
+    """Classify differing RTF column schemas as structure differences."""
+    left_path = test_data_dir / "rtf" / "ae_summary_baseline.rtf"
+    right_path = test_data_dir / "rtf" / "grouped_row_headers_vertical_merge.rtf"
+
+    result = compare_rtf_tables(left_path, right_path)
+
+    assert result.category == "structure_differences"
+    assert "column" in result.summary.lower()
+
+
+def test_compare_rtf_tables_detects_structure_difference_for_row_count(
+    test_data_dir: Path,
+) -> None:
+    """Classify differing RTF row counts as structure differences."""
+    left_path = test_data_dir / "rtf" / "ae_summary_baseline.rtf"
+    right_path = test_data_dir / "rtf" / "group_header_merged_spanning.rtf"
+
+    result = compare_rtf_tables(left_path, right_path)
+
+    assert result.category == "structure_differences"
+    assert "row count" in result.summary.lower()
