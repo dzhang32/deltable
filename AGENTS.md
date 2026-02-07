@@ -5,10 +5,8 @@
 
 Current intended classification buckets:
 1. `identical`: structure and data are equivalent.
-3. `data_diff_within_tolerance`: structure is equivalent and values differ only within configured tolerance.
-4. `data_diff_beyond_tolerance`: structure is equivalent and values differ beyond configured tolerance.
-5. `structure_diff`: larger structural changes (for example missing columns or different grouping) while still being recognizably related tables.
-6. `structure_diff_entirely`: structures are fundamentally different.
+2. `data_differences`: structure is equivalent and values differ.
+3. `structure_differences`: structural changes are present (for example missing columns, different grouping, or incompatible layout).
 
 ## Output Contract
 Comparison output should include:
@@ -16,14 +14,11 @@ Comparison output should include:
 - A short, human-readable summary string that explains the primary difference.
 - A returned dataclass instance for the comparison result.
 
-## Configuration
-- Numeric tolerance and category thresholds must be adjustable.
-- Do not hardcode comparison thresholds in a way that callers cannot override.
-
 ## Comparison Assumptions
 - Each `.rtf` contains exactly one table.
+- Style-only differences are ignored for classification.
 - When multiple differences apply, return the category representing the biggest difference.
-  Example: if both style and data differ, return the data difference category.
+  Example: if both style and data differ, return `data_differences`.
 
 ## Repository Context
 - Source code: `src/deltable/`
