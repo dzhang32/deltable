@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 import polars as pl
-from datacompy.core import Compare
+from datacompy.polars import PolarsCompare
 
 from deltable.rtf_table import load_rtf_table
 
@@ -24,11 +24,6 @@ class TableComparisonResult:
 
     category: ComparisonCategory
     summary: str
-    inferred_join_columns: tuple[str, ...]
-    all_columns_match: bool
-    all_rows_overlap: bool
-    intersect_rows_match: bool
-    report: str
 
 
 def compare_dataframes(
@@ -51,7 +46,7 @@ def compare_dataframes(
         ignore_spaces: Whether string comparisons should ignore spaces.
 
     Returns:
-        Classified comparison result with diagnostics and report text.
+        Classified comparison result.
     """
     join_columns = _infer_join_columns(left.columns)
     if missing_columns := [
@@ -64,11 +59,6 @@ def compare_dataframes(
         return TableComparisonResult(
             category="structure_differences",
             summary=summary,
-            inferred_join_columns=join_columns,
-            all_columns_match=False,
-            all_rows_overlap=False,
-            intersect_rows_match=False,
-            report=summary,
         )
 
     normalized_left = _normalize_string_columns(
@@ -82,9 +72,9 @@ def compare_dataframes(
         ignore_spaces=ignore_spaces,
     )
 
-    compare = Compare(
-        normalized_left.to_pandas(),
-        normalized_right.to_pandas(),
+    compare = PolarsCompare(
+        normalized_left,
+        normalized_right,
         join_columns=list(join_columns),
         abs_tol=abs_tol,
         rel_tol=rel_tol,
@@ -97,7 +87,6 @@ def compare_dataframes(
     all_columns_match = strict_column_match and bool(compare.all_columns_match())
     all_rows_overlap = bool(compare.all_rows_overlap())
     intersect_rows_match = bool(compare.intersect_rows_match())
-    report = compare.report()
     category = _classify_outcome(
         all_columns_match=all_columns_match,
         all_rows_overlap=all_rows_overlap,
@@ -116,11 +105,6 @@ def compare_dataframes(
     return TableComparisonResult(
         category=category,
         summary=summary,
-        inferred_join_columns=join_columns,
-        all_columns_match=all_columns_match,
-        all_rows_overlap=all_rows_overlap,
-        intersect_rows_match=intersect_rows_match,
-        report=report,
     )
 
 
@@ -197,8 +181,7 @@ def _build_summary(
 
     if not strict_column_match and not all_rows_overlap:
         return (
-            "Structure differs in both schema (column order/names) and row "
-            "membership."
+            "Structure differs in both schema (column order/names) and row membership."
         )
     if not strict_column_match:
         return "Structure differs: column names/order do not match exactly."

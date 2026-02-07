@@ -1,9 +1,21 @@
+from dataclasses import fields
 from pathlib import Path
 
 import polars as pl
 
-from deltable.comparison import compare_dataframes, compare_rtf_tables
+from deltable.comparison import (
+    TableComparisonResult,
+    compare_dataframes,
+    compare_rtf_tables,
+)
 from deltable.rtf_table import load_rtf_table
+
+
+def test_table_comparison_result_keeps_only_public_contract_fields() -> None:
+    """Expose only category and summary in comparison result."""
+    field_names = tuple(field.name for field in fields(TableComparisonResult))
+
+    assert field_names == ("category", "summary")
 
 
 def test_compare_dataframes_identical() -> None:
@@ -15,11 +27,6 @@ def test_compare_dataframes_identical() -> None:
 
     assert result.category == "identical"
     assert "identical" in result.summary.lower()
-    assert result.inferred_join_columns == ("Category",)
-    assert result.all_columns_match is True
-    assert result.all_rows_overlap is True
-    assert result.intersect_rows_match is True
-    assert result.report
 
 
 def test_compare_dataframes_detects_data_difference() -> None:
@@ -31,9 +38,6 @@ def test_compare_dataframes_detects_data_difference() -> None:
 
     assert result.category == "data_differences"
     assert "value" in result.summary.lower()
-    assert result.all_columns_match is True
-    assert result.all_rows_overlap is True
-    assert result.intersect_rows_match is False
 
 
 def test_compare_dataframes_detects_structure_difference_for_column_order() -> None:
@@ -45,7 +49,6 @@ def test_compare_dataframes_detects_structure_difference_for_column_order() -> N
 
     assert result.category == "structure_differences"
     assert "column" in result.summary.lower()
-    assert result.all_columns_match is False
 
 
 def test_compare_dataframes_detects_structure_difference_for_row_overlap() -> None:
@@ -57,8 +60,6 @@ def test_compare_dataframes_detects_structure_difference_for_row_overlap() -> No
 
     assert result.category == "structure_differences"
     assert "row" in result.summary.lower()
-    assert result.all_columns_match is True
-    assert result.all_rows_overlap is False
 
 
 def test_compare_dataframes_applies_numeric_tolerance() -> None:
@@ -90,8 +91,10 @@ def test_compare_dataframes_supports_ignore_case_and_spaces_flags() -> None:
     assert normalized.category == "identical"
 
 
-def test_compare_dataframes_infers_grouped_stub_join_columns(test_data_dir: Path) -> None:
-    """Infer two-stub join keys for grouped row-header tables."""
+def test_compare_dataframes_infers_grouped_stub_join_columns(
+    test_data_dir: Path,
+) -> None:
+    """Compare grouped row-header tables without false differences."""
     dataframe = load_rtf_table(
         test_data_dir / "rtf" / "grouped_row_headers_vertical_merge.rtf"
     )
@@ -99,10 +102,6 @@ def test_compare_dataframes_infers_grouped_stub_join_columns(test_data_dir: Path
     result = compare_dataframes(dataframe, dataframe)
 
     assert result.category == "identical"
-    assert result.inferred_join_columns == (
-        "System Organ Class",
-        "Preferred Term",
-    )
 
 
 def test_compare_rtf_tables_compares_loaded_rtf_fixtures(test_data_dir: Path) -> None:
@@ -113,4 +112,3 @@ def test_compare_rtf_tables_compares_loaded_rtf_fixtures(test_data_dir: Path) ->
     result = compare_rtf_tables(left_path, right_path)
 
     assert result.category == "identical"
-    assert result.inferred_join_columns == ("Category",)
