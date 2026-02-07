@@ -38,10 +38,11 @@ Be a practical engineering collaborator for this repository:
 - Keep persistent behavior rules in this file; keep task-specific details in user requests.
 - Do not assume missing project context. Ask when requirements are ambiguous.
 - Prefer minimal context loading and reference only files needed for the task.
+- Never add exports to `src/deltable/__init__.py` unless explicitly requested.
 
 ## Environment And Tooling
 Use `uv` for dependency and command management.
-- Do not use or regenerate `uv.lock`.
+- Never create or regenerate `uv.lock`.
 - When dependencies are needed, use `uv pip install ".[dev]"`.
 
 Setup:
