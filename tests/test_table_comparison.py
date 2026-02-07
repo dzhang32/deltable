@@ -29,15 +29,16 @@ def test_compare_dataframes_identical() -> None:
     assert "identical" in result.summary.lower()
 
 
-def test_compare_dataframes_detects_data_difference() -> None:
-    """Classify value mismatches under matching structure as data differences."""
+def test_compare_dataframes_detects_structure_difference_for_value_mismatch() -> None:
+    """Classify value mismatches as structure differences."""
     left = pl.DataFrame({"Category": ["A", "B"], "Total | n": ["1", "2"]})
     right = pl.DataFrame({"Category": ["A", "B"], "Total | n": ["1", "3"]})
 
     result = compare_dataframes(left, right)
 
-    assert result.category == "data_differences"
-    assert "value" in result.summary.lower()
+    assert result.category == "structure_differences"
+    assert "value mismatch" in result.summary.lower()
+    assert "total | n" in result.summary.lower()
 
 
 def test_compare_dataframes_detects_structure_difference_for_column_order() -> None:
@@ -51,15 +52,15 @@ def test_compare_dataframes_detects_structure_difference_for_column_order() -> N
     assert "column" in result.summary.lower()
 
 
-def test_compare_dataframes_detects_structure_difference_for_row_overlap() -> None:
-    """Classify missing/extra keyed rows as structure differences."""
+def test_compare_dataframes_detects_structure_difference_for_row_count() -> None:
+    """Classify differing row count as a structural mismatch."""
     left = pl.DataFrame({"Category": ["A", "B"], "Total | n": ["1", "2"]})
-    right = pl.DataFrame({"Category": ["A", "C"], "Total | n": ["1", "2"]})
+    right = pl.DataFrame({"Category": ["A", "B", "C"], "Total | n": ["1", "2", "3"]})
 
     result = compare_dataframes(left, right)
 
     assert result.category == "structure_differences"
-    assert "row" in result.summary.lower()
+    assert "row count" in result.summary.lower()
 
 
 def test_compare_dataframes_applies_numeric_tolerance() -> None:
@@ -71,7 +72,7 @@ def test_compare_dataframes_applies_numeric_tolerance() -> None:
     outside_tol = compare_dataframes(left, right, abs_tol=0.001)
 
     assert within_tol.category == "identical"
-    assert outside_tol.category == "data_differences"
+    assert outside_tol.category == "structure_differences"
 
 
 def test_compare_dataframes_supports_ignore_case_and_spaces_flags() -> None:
@@ -87,7 +88,7 @@ def test_compare_dataframes_supports_ignore_case_and_spaces_flags() -> None:
         ignore_spaces=True,
     )
 
-    assert strict.category == "data_differences"
+    assert strict.category == "structure_differences"
     assert normalized.category == "identical"
 
 
@@ -102,6 +103,18 @@ def test_compare_dataframes_infers_grouped_stub_join_columns(
     result = compare_dataframes(dataframe, dataframe)
 
     assert result.category == "identical"
+
+
+def test_compare_dataframes_stops_at_first_column_mismatch() -> None:
+    """Return first mismatch based on column order and row position."""
+    left = pl.DataFrame({"First": [1, 2], "Second": [10, 20]})
+    right = pl.DataFrame({"First": [9, 2], "Second": [99, 20]})
+
+    result = compare_dataframes(left, right)
+
+    assert result.category == "structure_differences"
+    assert "column 'first'" in result.summary.lower()
+    assert "row 0" in result.summary.lower()
 
 
 def test_compare_rtf_tables_compares_loaded_rtf_fixtures(test_data_dir: Path) -> None:

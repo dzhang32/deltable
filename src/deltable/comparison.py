@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
+import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypeIs
 
 import polars as pl
-from datacompy.polars import PolarsCompare
 
 from deltable.rtf_table import load_rtf_table
 
 type ComparisonCategory = Literal[
     "identical",
-    "data_differences",
     "structure_differences",
 ]
 
@@ -40,25 +40,21 @@ def compare_dataframes(
     Args:
         left: Left-hand table to compare.
         right: Right-hand table to compare.
-        abs_tol: Absolute numeric tolerance used by DataCompPy.
-        rel_tol: Relative numeric tolerance used by DataCompPy.
+        abs_tol: Absolute numeric tolerance for numeric values.
+        rel_tol: Relative numeric tolerance for numeric values.
         ignore_case: Whether string comparisons should ignore case.
         ignore_spaces: Whether string comparisons should ignore spaces.
 
     Returns:
         Classified comparison result.
     """
-    join_columns = _infer_join_columns(left.columns)
-    if missing_columns := [
-        column for column in join_columns if column not in right.columns
-    ]:
-        summary = (
-            "Structure differs: inferred join columns are missing in the right "
-            f"table ({', '.join(missing_columns)})."
-        )
+    if left.columns != right.columns:
         return TableComparisonResult(
             category="structure_differences",
-            summary=summary,
+            summary=(
+                "Structure differs: column names/order do not match exactly "
+                f"(left={left.columns}, right={right.columns})."
+            ),
         )
 
     normalized_left = _normalize_string_columns(
@@ -72,39 +68,43 @@ def compare_dataframes(
         ignore_spaces=ignore_spaces,
     )
 
-    compare = PolarsCompare(
-        normalized_left,
-        normalized_right,
-        join_columns=list(join_columns),
-        abs_tol=abs_tol,
-        rel_tol=rel_tol,
-        ignore_case=False,
-        ignore_spaces=False,
-        cast_column_names_lower=False,
-    )
+    if normalized_left.height != normalized_right.height:
+        return TableComparisonResult(
+            category="structure_differences",
+            summary=(
+                "Structure differs: row count does not match "
+                f"(left={normalized_left.height}, right={normalized_right.height})."
+            ),
+        )
 
-    strict_column_match = left.columns == right.columns
-    all_columns_match = strict_column_match and bool(compare.all_columns_match())
-    all_rows_overlap = bool(compare.all_rows_overlap())
-    intersect_rows_match = bool(compare.intersect_rows_match())
-    category = _classify_outcome(
-        all_columns_match=all_columns_match,
-        all_rows_overlap=all_rows_overlap,
-        intersect_rows_match=intersect_rows_match,
-    )
-    summary = _build_summary(
-        category=category,
-        strict_column_match=strict_column_match,
-        all_rows_overlap=all_rows_overlap,
-        abs_tol=abs_tol,
-        rel_tol=rel_tol,
-        ignore_case=ignore_case,
-        ignore_spaces=ignore_spaces,
-    )
+    for column in normalized_left.columns:
+        mismatch = _find_first_column_mismatch(
+            left_values=normalized_left.get_column(column).to_list(),
+            right_values=normalized_right.get_column(column).to_list(),
+            abs_tol=abs_tol,
+            rel_tol=rel_tol,
+        )
+        if mismatch is None:
+            continue
+
+        row_index, left_value, right_value = mismatch
+        return TableComparisonResult(
+            category="structure_differences",
+            summary=(
+                "Structure differs: value mismatch at column "
+                f"{column!r}, row {row_index} "
+                f"(left={left_value!r}, right={right_value!r})."
+            ),
+        )
 
     return TableComparisonResult(
-        category=category,
-        summary=summary,
+        category="identical",
+        summary=_build_identical_summary(
+            abs_tol=abs_tol,
+            rel_tol=rel_tol,
+            ignore_case=ignore_case,
+            ignore_spaces=ignore_spaces,
+        ),
     )
 
 
@@ -117,7 +117,7 @@ def compare_rtf_tables(
     ignore_case: bool = False,
     ignore_spaces: bool = False,
 ) -> TableComparisonResult:
-    """Load two RTF tables and compare them with DataCompPy."""
+    """Load two RTF tables and compare them."""
     left = load_rtf_table(left_path)
     right = load_rtf_table(right_path)
     return compare_dataframes(
@@ -130,62 +130,92 @@ def compare_rtf_tables(
     )
 
 
-def _infer_join_columns(headers: list[str]) -> tuple[str, ...]:
-    """Infer row-identity keys from leading stub columns."""
-    if not headers:
-        raise ValueError("Cannot infer join columns from an empty schema.")
-
-    for index, header in enumerate(headers):
-        if " | " in header:
-            return tuple(headers[: max(1, index)])
-    return (headers[0],)
-
-
-def _classify_outcome(
+def _build_identical_summary(
     *,
-    all_columns_match: bool,
-    all_rows_overlap: bool,
-    intersect_rows_match: bool,
-) -> ComparisonCategory:
-    """Map compare diagnostics to a comparison category."""
-    if not all_columns_match or not all_rows_overlap:
-        return "structure_differences"
-    if not intersect_rows_match:
-        return "data_differences"
-    return "identical"
-
-
-def _build_summary(
-    *,
-    category: ComparisonCategory,
-    strict_column_match: bool,
-    all_rows_overlap: bool,
     abs_tol: float,
     rel_tol: float,
     ignore_case: bool,
     ignore_spaces: bool,
 ) -> str:
-    """Build a short human-readable summary for the classification."""
+    """Build a short human-readable summary for identical tables."""
     options = (
         f"abs_tol={abs_tol}, rel_tol={rel_tol}, ignore_case={ignore_case}, "
         f"ignore_spaces={ignore_spaces}"
     )
-    if category == "identical":
-        return f"Tables are identical under comparison options ({options})."
+    return f"Tables are identical under comparison options ({options})."
 
-    if category == "data_differences":
-        return (
-            "Structure matches, but value differences were found in overlapping "
-            f"rows under options ({options})."
+
+def _find_first_column_mismatch(
+    *,
+    left_values: Sequence[object],
+    right_values: Sequence[object],
+    abs_tol: float,
+    rel_tol: float,
+) -> tuple[int, object, object] | None:
+    """Return the first mismatching row index and values for a column."""
+    for row_index, (left_value, right_value) in enumerate(
+        zip(left_values, right_values, strict=True)
+    ):
+        if _values_match(
+            left_value=left_value,
+            right_value=right_value,
+            abs_tol=abs_tol,
+            rel_tol=rel_tol,
+        ):
+            continue
+        return (row_index, left_value, right_value)
+
+    return None
+
+
+def _values_match(
+    *,
+    left_value: object,
+    right_value: object,
+    abs_tol: float,
+    rel_tol: float,
+) -> bool:
+    """Check whether two values should be considered equal."""
+    if left_value is None and right_value is None:
+        return True
+    if left_value is None or right_value is None:
+        return False
+
+    if _is_numeric_value(left_value) and _is_numeric_value(right_value):
+        return _numbers_match(
+            left_value=float(left_value),
+            right_value=float(right_value),
+            abs_tol=abs_tol,
+            rel_tol=rel_tol,
         )
 
-    if not strict_column_match and not all_rows_overlap:
-        return (
-            "Structure differs in both schema (column order/names) and row membership."
-        )
-    if not strict_column_match:
-        return "Structure differs: column names/order do not match exactly."
-    return "Structure differs: row membership does not fully overlap."
+    return left_value == right_value
+
+
+def _is_numeric_value(value: object) -> TypeIs[int | float]:
+    """Return whether a value should use numeric tolerance comparison."""
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _numbers_match(
+    *,
+    left_value: float,
+    right_value: float,
+    abs_tol: float,
+    rel_tol: float,
+) -> bool:
+    """Check numeric equality with absolute and relative tolerance."""
+    if math.isnan(left_value) and math.isnan(right_value):
+        return True
+    if math.isnan(left_value) or math.isnan(right_value):
+        return False
+
+    return math.isclose(
+        left_value,
+        right_value,
+        abs_tol=abs_tol,
+        rel_tol=rel_tol,
+    )
 
 
 def _normalize_string_columns(
