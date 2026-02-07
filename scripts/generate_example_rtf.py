@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 import polars as pl
 from rtflite import (
@@ -28,6 +30,10 @@ TITLE = "Table 14.3.1 Summary of Treatment-Emergent Adverse Events (Safety Popul
 SUBTITLE = "Safety Population"
 FOOTNOTE = "Every subject is counted a single time for each applicable row and column."
 SOURCE = "Source: Synthetic data generated for fixture purposes."
+RTF_OUTPUT_DIR = Path("tests/data/rtf")
+CSV_OUTPUT_DIR = Path("tests/data/csv")
+BASE_RTF_OUTPUT_PATH = RTF_OUTPUT_DIR / "ae_summary_baseline.rtf"
+BASE_CSV_OUTPUT_PATH = CSV_OUTPUT_DIR / "ae_summary_baseline.csv"
 
 TREATMENTS = [
     TreatmentGroup(name="Placebo", n=60),
@@ -236,12 +242,316 @@ def build_rtf(df: pl.DataFrame) -> RTFDocument:
     )
 
 
+def build_expected_loader_table() -> pl.DataFrame:
+    """Build expected CSV output matching `load_rtf_table` semantics."""
+    column_names = ["Category"]
+    for treatment in TREATMENTS:
+        group_name = f"{treatment.name} (N={treatment.n})"
+        column_names.append(f"{group_name} | n")
+        column_names.append(f"{group_name} | (%)")
+
+    rows: list[dict[str, str]] = []
+    for label, values in ROWS:
+        row: dict[str, str] = {"Category": label.strip()}
+        for treatment in TREATMENTS:
+            count = values.get(treatment.name)
+            show_blank_pct = label.strip() == "Participants in population"
+            row[f"{treatment.name} (N={treatment.n}) | n"] = (
+                "" if count is None else f"{count}"
+            )
+            row[f"{treatment.name} (N={treatment.n}) | (%)"] = _format_percent(
+                count,
+                treatment.n,
+                show_blank=show_blank_pct,
+            )
+        rows.append(row)
+
+    return pl.DataFrame(rows).select(column_names)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class VariantSpec:
+    """Describe one formatting variant fixture."""
+
+    name: str
+    rtf_transform: Callable[[str], str]
+    csv_transform: Callable[[str], str]
+
+
+def _identity(text: str) -> str:
+    """Return input text unchanged."""
+    return text
+
+
+def _replace_or_raise(text: str, old: str, new: str) -> str:
+    """Replace a required substring once."""
+    if old not in text:
+        raise ValueError(f"Required text not found: {old!r}")
+    return text.replace(old, new, 1)
+
+
+def _replace_n_or_raise(text: str, old: str, new: str, count: int) -> str:
+    """Replace a required substring a fixed number of times."""
+    updated = text
+    for _ in range(count):
+        if old not in updated:
+            raise ValueError(f"Required text not found enough times: {old!r}")
+        updated = updated.replace(old, new, 1)
+    return updated
+
+
+def _replace_first_row_block(text: str, replacement: str) -> str:
+    """Replace the first header-row block."""
+    pattern = re.compile(
+        r"\\trowd\\trgaph108\\trleft0\\trqc\n.*?\\intbl\\row\\pard",
+        flags=re.DOTALL,
+    )
+    match = pattern.search(text)
+    if match is None:
+        raise ValueError("Unable to locate first row block.")
+    return text[: match.start()] + replacement + text[match.end() :]
+
+
+def _insert_first_cell_modifier_before_label(
+    text: str,
+    label: str,
+    modifier: str,
+) -> str:
+    """Insert a cell modifier in the first column before a target label."""
+    label_index = text.find(label)
+    if label_index == -1:
+        raise ValueError(f"Unable to locate label: {label!r}")
+
+    marker = (
+        r"\clbrdrl\brdrs\brdrw15\clbrdrt\brdrw15\clbrdrb\brdrw15\clvertalt\cellx2455"
+    )
+    marker_index = text.rfind(marker, 0, label_index)
+    if marker_index == -1:
+        raise ValueError(f"Unable to locate first-cell marker before: {label!r}")
+
+    return (
+        text[:marker_index]
+        + modifier
+        + text[marker_index : marker_index + len(marker)]
+        + text[marker_index + len(marker) :]
+    )
+
+
+def _rtf_multiline_headers(text: str) -> str:
+    """Inject multiline treatment headers."""
+    updated = text
+    updated = _replace_or_raise(
+        updated,
+        r"{\f0 Placebo (N=60)}\cell",
+        r"{\f0 Placebo\line (N=60)}\cell",
+    )
+    updated = _replace_or_raise(
+        updated,
+        r"{\f0 Low Dose (N=60)}\cell",
+        r"{\f0 Low Dose\line (N=60)}\cell",
+    )
+    updated = _replace_or_raise(
+        updated,
+        r"{\f0 High Dose (N=60)}\cell",
+        r"{\f0 High Dose\line (N=60)}\cell",
+    )
+    updated = _replace_or_raise(
+        updated,
+        r"{\f0 Total (N=180)}\cell",
+        r"{\f0 Total\line (N=180)}\cell",
+    )
+    return updated
+
+
+def _rtf_indented_group_rows(text: str) -> str:
+    """Apply additional indentation to grouped rows."""
+    updated = text
+    updated = _replace_or_raise(
+        updated,
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\ql\fs18{\f0 Worst severity}\cell",
+        r"\pard\hyphpar0\sb15\sa15\fi0\li180\ri0\ql\fs18{\f0 Worst severity}\cell",
+    )
+    updated = _replace_or_raise(
+        updated,
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\ql\fs18{\f0   Mild}\cell",
+        r"\pard\hyphpar0\sb15\sa15\fi0\li360\ri0\ql\fs18{\f0   Mild}\cell",
+    )
+    updated = _replace_or_raise(
+        updated,
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\ql\fs18{\f0   Moderate}\cell",
+        r"\pard\hyphpar0\sb15\sa15\fi0\li360\ri0\ql\fs18{\f0   Moderate}\cell",
+    )
+    updated = _replace_or_raise(
+        updated,
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\ql\fs18{\f0   Severe}\cell",
+        r"\pard\hyphpar0\sb15\sa15\fi0\li360\ri0\ql\fs18{\f0   Severe}\cell",
+    )
+    return updated
+
+
+def _rtf_repeating_header_rows(text: str) -> str:
+    """Set top header rows to repeat using `\\trhdr`."""
+    return _replace_n_or_raise(
+        text,
+        r"\trowd\trgaph108\trleft0\trqc",
+        r"\trowd\trhdr\trgaph108\trleft0\trqc",
+        count=2,
+    )
+
+
+def _rtf_horizontal_merge_spanner(text: str) -> str:
+    """Introduce a horizontal-merge spanner header row."""
+    replacement = (
+        r"\trowd\trgaph108\trleft0\trqc"
+        "\n"
+        r"\clbrdrl\brdrs\brdrw15\clbrdrt\brdrdb\brdrw15\clbrdrb\brdrw15\clvertalb\cellx2455"
+        "\n"
+        r"\clmgf\clbrdrl\brdrs\brdrw15\clbrdrt\brdrdb\brdrw15\clbrdrb\brdrw15\clvertalb\cellx5727"
+        "\n"
+        r"\clmrg\clbrdrl\brdrs\brdrw15\clbrdrt\brdrdb\brdrw15\clbrdrr\brdrs\brdrw15\clbrdrb\brdrw15\clvertalb\cellx9000"
+        "\n"
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\qc\fs18{\f0 Category}\cell"
+        "\n"
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\qc\fs18{\f0 Treatment Groups}\cell"
+        "\n"
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\qc\fs18{\f0 }\cell"
+        "\n"
+        r"\intbl\row\pard"
+    )
+    return _replace_first_row_block(text, replacement)
+
+
+def _rtf_vertical_merge_stub(text: str) -> str:
+    """Introduce vertical merge controls in the first column."""
+    updated = text
+    updated = _insert_first_cell_modifier_before_label(
+        updated,
+        label=r"{\f0 Worst severity}\cell",
+        modifier=r"\clvmgf",
+    )
+    updated = _insert_first_cell_modifier_before_label(
+        updated,
+        label=r"{\f0   Mild}\cell",
+        modifier=r"\clvmrg",
+    )
+    updated = _insert_first_cell_modifier_before_label(
+        updated,
+        label=r"{\f0   Moderate}\cell",
+        modifier=r"\clvmrg",
+    )
+    updated = _replace_or_raise(
+        updated,
+        r"{\f0   Mild}\cell",
+        r"{\f0 }\cell",
+    )
+    updated = _replace_or_raise(
+        updated,
+        r"{\f0   Moderate}\cell",
+        r"{\f0 }\cell",
+    )
+    return updated
+
+
+def _rtf_unicode_superscript(text: str) -> str:
+    """Inject superscript and Unicode marker escapes."""
+    updated = text
+    updated = _replace_or_raise(
+        updated,
+        r"{\f0 Placebo (N=60)}\cell",
+        r"{\f0 Placebo (N=60){\super a}}\cell",
+    )
+    updated = _replace_or_raise(
+        updated,
+        r"{\f0 With any adverse event}\cell",
+        r"{\f0 With any adverse event \u8224?}\cell",
+    )
+    return updated
+
+
+def _csv_unicode_expected(text: str) -> str:
+    """Set expected Unicode output for the body-row marker."""
+    return _replace_or_raise(
+        text,
+        "With any adverse event,28,(46.7),32,(53.3),36,(60.0),96,(53.3)",
+        "With any adverse event †,28,(46.7),32,(53.3),36,(60.0),96,(53.3)",
+    )
+
+
+VARIANTS = [
+    VariantSpec(
+        name="multiline_headers",
+        rtf_transform=_rtf_multiline_headers,
+        csv_transform=_identity,
+    ),
+    VariantSpec(
+        name="indented_group_rows",
+        rtf_transform=_rtf_indented_group_rows,
+        csv_transform=_identity,
+    ),
+    VariantSpec(
+        name="repeating_header_row",
+        rtf_transform=_rtf_repeating_header_rows,
+        csv_transform=_identity,
+    ),
+    VariantSpec(
+        name="spanning_header_horizontal_merge",
+        rtf_transform=_rtf_horizontal_merge_spanner,
+        csv_transform=_identity,
+    ),
+    VariantSpec(
+        name="vertical_merge_stub_column",
+        rtf_transform=_rtf_vertical_merge_stub,
+        csv_transform=_identity,
+    ),
+    VariantSpec(
+        name="unicode_superscript_symbols",
+        rtf_transform=_rtf_unicode_superscript,
+        csv_transform=_csv_unicode_expected,
+    ),
+]
+
+
+def _generate_variant_fixtures(base_rtf: str, base_csv: str) -> None:
+    """Generate RTF/CSV variant fixture pairs."""
+    RTF_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    CSV_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    for variant in VARIANTS:
+        rtf_output = variant.rtf_transform(base_rtf)
+        csv_output = variant.csv_transform(base_csv)
+
+        rtf_path = RTF_OUTPUT_DIR / f"{variant.name}.rtf"
+        csv_path = CSV_OUTPUT_DIR / f"{variant.name}.csv"
+        rtf_path.write_text(_with_trailing_newline(rtf_output), encoding="utf-8")
+        csv_path.write_text(csv_output, encoding="utf-8")
+
+
+def _with_trailing_newline(text: str) -> str:
+    """Ensure text ends with exactly one newline."""
+    return text.rstrip("\n") + "\n"
+
+
 def main() -> None:
-    """Generate the RTF fixture file."""
+    """Generate baseline and variant fixture files."""
     df = build_table()
     doc = build_rtf(df)
-    output_path = Path("tests/data/rtf/ae_summary_example.rtf")
-    doc.write_rtf(output_path)
+    BASE_RTF_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    BASE_CSV_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    doc.write_rtf(BASE_RTF_OUTPUT_PATH)
+    BASE_RTF_OUTPUT_PATH.write_text(
+        _with_trailing_newline(
+            BASE_RTF_OUTPUT_PATH.read_text(encoding="utf-8", errors="ignore")
+        ),
+        encoding="utf-8",
+    )
+
+    expected_df = build_expected_loader_table()
+    expected_df.write_csv(BASE_CSV_OUTPUT_PATH)
+
+    base_rtf = BASE_RTF_OUTPUT_PATH.read_text(encoding="utf-8", errors="ignore")
+    base_csv = BASE_CSV_OUTPUT_PATH.read_text(encoding="utf-8")
+    _generate_variant_fixtures(base_rtf=base_rtf, base_csv=base_csv)
 
 
 if __name__ == "__main__":

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 import polars as pl
-
 
 ROW_PATTERN = re.compile(r"\\trowd(?P<body>.*?)(?:\\intbl\\row\\pard)", re.DOTALL)
 CELL_PATTERN = re.compile(r"\\pard(?P<cell>.*?)(?=\\cell(?!x))", re.DOTALL)

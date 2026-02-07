@@ -1,12 +1,12 @@
 Category,Placebo (N=60) | n,Placebo (N=60) | (%),Low Dose (N=60) | n,Low Dose (N=60) | (%),High Dose (N=60) | n,High Dose (N=60) | (%),Total (N=180) | n,Total (N=180) | (%)
-Participants in population,60,,60,,60,,180,
-With any adverse event,28,(46.7),32,(53.3),36,(60.0),96,(53.3)
+Participants in population,60,"",60,"",60,"",180,""
+With any adverse event †,28,(46.7),32,(53.3),36,(60.0),96,(53.3)
 With drug-related adverse event,10,(16.7),14,(23.3),18,(30.0),42,(23.3)
 With serious adverse event,4,(6.7),6,(10.0),8,(13.3),18,(10.0)
 With serious drug-related adverse event,1,(1.7),2,(3.3),3,(5.0),6,(3.3)
 Discontinued due to adverse event,2,(3.3),3,(5.0),4,(6.7),9,(5.0)
 Who died,0,(0.0),1,(1.7),2,(3.3),3,(1.7)
-Worst severity,,,,,,,,
+Worst severity,"","","","","","","",""
 Mild,12,(20.0),14,(23.3),16,(26.7),42,(23.3)
 Moderate,10,(16.7),12,(20.0),13,(21.7),35,(19.4)
 Severe,6,(10.0),6,(10.0),7,(11.7),19,(10.6)
