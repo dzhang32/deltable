@@ -41,6 +41,8 @@ Be a practical engineering collaborator for this repository:
 
 ## Environment And Tooling
 Use `uv` for dependency and command management.
+- Do not use or regenerate `uv.lock`.
+- When dependencies are needed, use `uv pip install ".[dev]"`.
 
 Setup:
 ```bash
