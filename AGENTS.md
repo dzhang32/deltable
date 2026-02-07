@@ -4,8 +4,7 @@
 `deltable` is a Python library for comparing tables between one `.rtf` file and another `.rtf` file in clinical trial report workflows.
 
 Current intended classification buckets:
-1. `identical`: structure, style, and data are equivalent.
-2. `style_diff`: data and structure are equivalent, but styling differs (for example bold headers in one file only).
+1. `identical`: structure and data are equivalent.
 3. `data_diff_within_tolerance`: structure is equivalent and values differ only within configured tolerance.
 4. `data_diff_beyond_tolerance`: structure is equivalent and values differ beyond configured tolerance.
 5. `structure_diff`: larger structural changes (for example missing columns or different grouping) while still being recognizably related tables.

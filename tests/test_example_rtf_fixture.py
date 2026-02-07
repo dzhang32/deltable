@@ -1,13 +1,8 @@
 from pathlib import Path
 
 
-TITLE = (
-    "Table 14.3.1 Summary of Treatment-Emergent Adverse Events "
-    "(Safety Population)"
-)
-FOOTNOTE = (
-    "Every subject is counted a single time for each applicable row and column."
-)
+TITLE = "Table 14.3.1 Summary of Treatment-Emergent Adverse Events (Safety Population)"
+FOOTNOTE = "Every subject is counted a single time for each applicable row and column."
 RTF_PATH = Path("tests/data/rtf/ae_summary_example.rtf")
 
 

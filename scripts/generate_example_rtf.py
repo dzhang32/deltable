@@ -24,14 +24,9 @@ class TreatmentGroup:
     n: int
 
 
-TITLE = (
-    "Table 14.3.1 Summary of Treatment-Emergent Adverse Events "
-    "(Safety Population)"
-)
+TITLE = "Table 14.3.1 Summary of Treatment-Emergent Adverse Events (Safety Population)"
 SUBTITLE = "Safety Population"
-FOOTNOTE = (
-    "Every subject is counted a single time for each applicable row and column."
-)
+FOOTNOTE = "Every subject is counted a single time for each applicable row and column."
 SOURCE = "Source: Synthetic data generated for fixture purposes."
 
 TREATMENTS = [
