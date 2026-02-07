@@ -7,17 +7,15 @@ authors = [
 ]
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.14"
-dependencies = [
-    "polars==1.36.1",
-    "rtflite==2.5.3",
-]
+requires-python = "==3.10.*"
+dependencies = []
 
 [project.optional-dependencies]
 dev = [
     "pre-commit==4.3.0",
     "pytest==8.4.1",
     "pytest-cov==6.0.0",
+    "rtflite==2.5.3",
 ]
 
 [build-system]

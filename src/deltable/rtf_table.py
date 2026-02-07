@@ -1,12 +1,15 @@
-"""Load a single-table RTF document into a Polars DataFrame."""
+"""Load a single-table RTF document into a column-oriented table mapping."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import re
 from pathlib import Path
+from typing import Any, Callable
 
-import polars as pl
+TableData = dict[str, list[Any]]
+RawTableData = dict[str, list[str | None]]
 
 ROW_PATTERN = re.compile(
     r"\\trowd(?P<body>.*?)(?:(?:\\intbl\s*)?\\row(?:\s*\\pard)?)",
@@ -20,6 +23,7 @@ HEX_ESCAPE_PATTERN = re.compile(r"\\'[0-9a-fA-F]{2}")
 SUPERSCRIPT_GROUP_PATTERN = re.compile(r"\{\\super\s+[^{}]*\}")
 ESCAPED_BRACE_PATTERN = re.compile(r"\\([{}\\])")
 WHITESPACE_PATTERN = re.compile(r"\s+")
+INTEGER_PATTERN = re.compile(r"[+-]?\d+")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -40,14 +44,14 @@ class ParsedRow:
     cells: list[RowCell]
 
 
-def load_rtf_table(path: Path | str) -> pl.DataFrame:
-    """Load a single RTF table from disk into a Polars DataFrame.
+def load_rtf_table(path: Path | str) -> TableData:
+    """Load a single RTF table from disk into a column-oriented mapping.
 
     Args:
         path: Path to an RTF file containing one table.
 
     Returns:
-        Parsed table data as a Polars DataFrame with string columns.
+        Parsed table data keyed by column name.
 
     Raises:
         ValueError: If the RTF table cannot be normalized to a consistent shape.
@@ -76,11 +80,74 @@ def load_rtf_table(path: Path | str) -> pl.DataFrame:
     if not body_rows:
         raise ValueError("RTF table did not contain any body rows.")
 
-    return pl.DataFrame(
-        body_rows,
-        schema=headers,
-        orient="row",
-    )
+    raw_table = _rows_to_table_data(headers=headers, rows=body_rows)
+    return _parse_numeric_columns(raw_table)
+
+
+def _rows_to_table_data(*, headers: list[str], rows: list[list[str]]) -> RawTableData:
+    """Build a column-oriented table dictionary from normalized row values."""
+    table: RawTableData = {header: [] for header in headers}
+
+    for row_values in rows:
+        for header, cell_value in zip(headers, row_values, strict=True):
+            table[header].append(_normalize_output_value(cell_value))
+
+    return table
+
+
+def _normalize_output_value(value: str) -> str | None:
+    """Map empty parsed cell text to None."""
+    stripped_value = value.strip()
+    if not stripped_value:
+        return None
+    return stripped_value
+
+
+def _parse_numeric_columns(table: RawTableData) -> TableData:
+    """Parse numeric columns using strict per-column inference."""
+    parsed_table: TableData = {}
+    for column_name, values in table.items():
+        parser = _infer_numeric_parser(values)
+        if parser is None:
+            parsed_table[column_name] = values.copy()
+            continue
+
+        parsed_table[column_name] = [
+            None if value is None else parser(value) for value in values
+        ]
+
+    return parsed_table
+
+
+def _infer_numeric_parser(
+    values: list[str | None],
+) -> Callable[[str], int | float] | None:
+    """Infer int/float parser for a full column when all values are numeric."""
+    non_null_values = [value for value in values if value is not None]
+    if not non_null_values:
+        return None
+
+    if all(_can_parse_int(value) for value in non_null_values):
+        return int
+
+    if all(_can_parse_float(value) for value in non_null_values):
+        return float
+
+    return None
+
+
+def _can_parse_int(value: str) -> bool:
+    """Return whether a value is an integer literal."""
+    return bool(INTEGER_PATTERN.fullmatch(value))
+
+
+def _can_parse_float(value: str) -> bool:
+    """Return whether a value can be parsed as a finite float."""
+    try:
+        parsed_value = float(value)
+    except ValueError:
+        return False
+    return math.isfinite(parsed_value)
 
 
 def _extract_rows_from_rtf(rtf_text: str) -> list[ParsedRow]:

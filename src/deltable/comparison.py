@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, TypeIs
+from typing import Any, Literal
 
-import polars as pl
+from deltable.rtf_table import TableData, load_rtf_table
 
-from deltable.rtf_table import load_rtf_table
-
-type ComparisonCategory = Literal[
+ComparisonCategory = Literal[
     "identical",
     "structure_differences",
 ]
+
+WHITESPACE_PATTERN = re.compile(r"\s+")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -26,16 +27,16 @@ class TableComparisonResult:
     summary: str
 
 
-def compare_dataframes(
-    left: pl.DataFrame,
-    right: pl.DataFrame,
+def compare_tables(
+    left: TableData,
+    right: TableData,
     *,
     abs_tol: float = 0.0,
     rel_tol: float = 0.0,
     ignore_case: bool = False,
     ignore_spaces: bool = False,
 ) -> TableComparisonResult:
-    """Compare two Polars DataFrames and classify the result.
+    """Compare two column-oriented tables and classify the result.
 
     Args:
         left: Left-hand table to compare.
@@ -47,13 +48,29 @@ def compare_dataframes(
 
     Returns:
         Classified comparison result.
+
+    Raises:
+        ValueError: If a table has inconsistent column lengths.
     """
-    if left.columns != right.columns:
+    left_columns = list(left.keys())
+    right_columns = list(right.keys())
+    if left_columns != right_columns:
         return TableComparisonResult(
             category="structure_differences",
             summary=(
                 "Structure differs: column names/order do not match exactly "
-                f"(left={left.columns}, right={right.columns})."
+                f"(left={left_columns}, right={right_columns})."
+            ),
+        )
+
+    left_row_count = _get_row_count(left, label="left")
+    right_row_count = _get_row_count(right, label="right")
+    if left_row_count != right_row_count:
+        return TableComparisonResult(
+            category="structure_differences",
+            summary=(
+                "Structure differs: row count does not match "
+                f"(left={left_row_count}, right={right_row_count})."
             ),
         )
 
@@ -68,19 +85,10 @@ def compare_dataframes(
         ignore_spaces=ignore_spaces,
     )
 
-    if normalized_left.height != normalized_right.height:
-        return TableComparisonResult(
-            category="structure_differences",
-            summary=(
-                "Structure differs: row count does not match "
-                f"(left={normalized_left.height}, right={normalized_right.height})."
-            ),
-        )
-
-    for column in normalized_left.columns:
+    for column in left_columns:
         mismatch = _find_first_column_mismatch(
-            left_values=normalized_left.get_column(column).to_list(),
-            right_values=normalized_right.get_column(column).to_list(),
+            left_values=normalized_left[column],
+            right_values=normalized_right[column],
             abs_tol=abs_tol,
             rel_tol=rel_tol,
         )
@@ -120,7 +128,7 @@ def compare_rtf_tables(
     """Load two RTF tables and compare them."""
     left = load_rtf_table(left_path)
     right = load_rtf_table(right_path)
-    return compare_dataframes(
+    return compare_tables(
         left,
         right,
         abs_tol=abs_tol,
@@ -128,6 +136,18 @@ def compare_rtf_tables(
         ignore_case=ignore_case,
         ignore_spaces=ignore_spaces,
     )
+
+
+def _get_row_count(table: TableData, *, label: str) -> int:
+    """Return table row count and ensure column lengths are consistent."""
+    if not table:
+        return 0
+
+    row_counts = {len(values) for values in table.values()}
+    if len(row_counts) != 1:
+        raise ValueError(f"{label} table has inconsistent column lengths.")
+
+    return next(iter(row_counts))
 
 
 def _build_identical_summary(
@@ -147,11 +167,11 @@ def _build_identical_summary(
 
 def _find_first_column_mismatch(
     *,
-    left_values: Sequence[object],
-    right_values: Sequence[object],
+    left_values: Sequence[Any],
+    right_values: Sequence[Any],
     abs_tol: float,
     rel_tol: float,
-) -> tuple[int, object, object] | None:
+) -> tuple[int, Any, Any] | None:
     """Return the first mismatching row index and values for a column."""
     for row_index, (left_value, right_value) in enumerate(
         zip(left_values, right_values, strict=True)
@@ -170,8 +190,8 @@ def _find_first_column_mismatch(
 
 def _values_match(
     *,
-    left_value: object,
-    right_value: object,
+    left_value: Any,
+    right_value: Any,
     abs_tol: float,
     rel_tol: float,
 ) -> bool:
@@ -181,7 +201,12 @@ def _values_match(
     if left_value is None or right_value is None:
         return False
 
-    if _is_numeric_value(left_value) and _is_numeric_value(right_value):
+    if (
+        isinstance(left_value, (int, float))
+        and not isinstance(left_value, bool)
+        and isinstance(right_value, (int, float))
+        and not isinstance(right_value, bool)
+    ):
         return _numbers_match(
             left_value=float(left_value),
             right_value=float(right_value),
@@ -190,11 +215,6 @@ def _values_match(
         )
 
     return left_value == right_value
-
-
-def _is_numeric_value(value: object) -> TypeIs[int | float]:
-    """Return whether a value should use numeric tolerance comparison."""
-    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
 def _numbers_match(
@@ -219,28 +239,31 @@ def _numbers_match(
 
 
 def _normalize_string_columns(
-    dataframe: pl.DataFrame,
+    table: TableData,
     *,
     ignore_case: bool,
     ignore_spaces: bool,
-) -> pl.DataFrame:
-    """Normalize string columns before comparison."""
+) -> TableData:
+    """Normalize string values before comparison."""
     if not ignore_case and not ignore_spaces:
-        return dataframe
+        return {column: values.copy() for column, values in table.items()}
 
-    expressions: list[pl.Expr] = []
-    for column, dtype in dataframe.schema.items():
-        if dtype == pl.String:
-            normalized_column = pl.col(column)
+    normalized: TableData = {}
+    for column, values in table.items():
+        normalized_values: list[Any] = []
+        for value in values:
+            if not isinstance(value, str):
+                normalized_values.append(value)
+                continue
+
+            normalized_value = value
             if ignore_case:
-                normalized_column = normalized_column.str.to_lowercase()
+                normalized_value = normalized_value.lower()
             if ignore_spaces:
-                normalized_column = normalized_column.str.replace_all(
-                    r"\s+",
-                    "",
-                )
-            expressions.append(normalized_column.alias(column))
-            continue
-        expressions.append(pl.col(column))
+                normalized_value = WHITESPACE_PATTERN.sub("", normalized_value)
 
-    return dataframe.select(expressions)
+            normalized_values.append(normalized_value)
+
+        normalized[column] = normalized_values
+
+    return normalized
