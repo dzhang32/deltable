@@ -39,6 +39,7 @@ VARIANT_CASES = [
     VariantCase(name="group_header_first_cell_bare_cells"),
     VariantCase(name="group_header_merged_spanning"),
     VariantCase(name="row_terminator_plain_row"),
+    VariantCase(name="grouped_row_headers_vertical_merge"),
 ]
 
 
@@ -150,3 +151,24 @@ def test_load_rtf_table_raises_on_inconsistent_body_row_width(tmp_path: Path) ->
 
     with pytest.raises(ValueError, match="inconsistent row width"):
         load_rtf_table(malformed_path)
+
+
+def test_load_rtf_table_grouped_row_headers_preserve_hierarchy(
+    test_data_dir: Path,
+) -> None:
+    """Preserve two-stub grouped row headers without parent label propagation."""
+    rtf_path = test_data_dir / "rtf" / "grouped_row_headers_vertical_merge.rtf"
+    dataframe = load_rtf_table(rtf_path)
+
+    assert dataframe.columns[:2] == ["System Organ Class", "Preferred Term"]
+    rows = dataframe.to_dicts()
+    assert any(
+        row["System Organ Class"] == "" and row["Preferred Term"] == "Tachycardia"
+        for row in rows
+    )
+    assert any(
+        row["System Organ Class"] == "" and row["Preferred Term"] == "Headache"
+        for row in rows
+    )
+    assert any(row["System Organ Class"] == "Cardiac disorders" for row in rows)
+    assert any(row["System Organ Class"] == "Nervous system disorders" for row in rows)

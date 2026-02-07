@@ -64,12 +64,14 @@ def load_rtf_table(path: Path | str) -> pl.DataFrame:
         header_row_2=header_sub,
         header_row_1_cells=rows[0].cells,
     )
+    stub_column_span = _infer_stub_column_span(headers)
 
     body_rows = _normalize_body_rows(
         rows=rows[2:],
         width=len(headers),
         header_row_1=header_top,
         header_row_2=header_sub,
+        stub_column_span=stub_column_span,
     )
     if not body_rows:
         raise ValueError("RTF table did not contain any body rows.")
@@ -173,9 +175,11 @@ def _build_composite_headers(
     header_row_1_cells: list[RowCell],
 ) -> list[str]:
     """Build flattened column names from two header rows."""
+    header_stub_column_count = _infer_header_stub_column_count(header_row_2)
     expanded_header_row_1 = _expand_header_row(
         header_row=header_row_1,
         target_length=len(header_row_2),
+        stub_column_count=header_stub_column_count,
     )
     expanded_header_row_1 = _apply_horizontal_merge_labels(
         header_row_1=expanded_header_row_1,
@@ -226,7 +230,21 @@ def _apply_horizontal_merge_labels(
     return merged_labels
 
 
-def _expand_header_row(header_row: list[str], target_length: int) -> list[str]:
+def _infer_header_stub_column_count(header_row_2: list[str]) -> int:
+    """Infer leading stub columns from blank second-header cells."""
+    count = 0
+    for value in header_row_2:
+        if value.strip():
+            break
+        count += 1
+    return max(1, count)
+
+
+def _expand_header_row(
+    header_row: list[str],
+    target_length: int,
+    stub_column_count: int,
+) -> list[str]:
     """Expand a grouped top header row to the full second-header width."""
     if target_length <= 0:
         return []
@@ -240,12 +258,17 @@ def _expand_header_row(header_row: list[str], target_length: int) -> list[str]:
     if len(header_row) == 1:
         return [header_row[0]] * target_length
 
-    first_column = header_row[0]
-    grouped_columns = header_row[1:]
-    remaining_width = target_length - 1
-    expanded_row = [first_column]
+    stub_column_count = min(stub_column_count, len(header_row), target_length)
+    stub_columns = header_row[:stub_column_count]
+    grouped_columns = header_row[stub_column_count:]
+    remaining_width = target_length - stub_column_count
+    expanded_row = stub_columns.copy()
 
-    if grouped_columns and remaining_width % len(grouped_columns) == 0:
+    if (
+        grouped_columns
+        and remaining_width > 0
+        and remaining_width % len(grouped_columns) == 0
+    ):
         repeat_count = remaining_width // len(grouped_columns)
         for grouped_header in grouped_columns:
             expanded_row.extend([grouped_header] * repeat_count)
@@ -294,12 +317,21 @@ def _deduplicate_headers(headers: list[str]) -> list[str]:
     return deduplicated
 
 
+def _infer_stub_column_span(headers: list[str]) -> int:
+    """Infer leading stub columns before treatment measure columns."""
+    for index, header in enumerate(headers):
+        if " | " in header:
+            return max(1, index)
+    return len(headers)
+
+
 def _normalize_body_rows(
     *,
     rows: list[ParsedRow],
     width: int,
     header_row_1: list[str],
     header_row_2: list[str],
+    stub_column_span: int,
 ) -> list[list[str]]:
     """Normalize body rows and enforce consistent body width."""
     filtered_rows: list[ParsedRow] = []
@@ -332,7 +364,12 @@ def _normalize_body_rows(
         # first cell blank under vertical merge controls.
         if row_values[0]:
             last_first_cell_value = row_values[0]
-        elif row.cells and row.cells[0].v_merge_continue and last_first_cell_value:
+        elif (
+            stub_column_span == 1
+            and row.cells
+            and row.cells[0].v_merge_continue
+            and last_first_cell_value
+        ):
             row_values[0] = last_first_cell_value
 
         normalized_rows.append(row_values)

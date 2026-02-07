@@ -34,6 +34,12 @@ RTF_OUTPUT_DIR = Path("tests/data/rtf")
 CSV_OUTPUT_DIR = Path("tests/data/csv")
 BASE_RTF_OUTPUT_PATH = RTF_OUTPUT_DIR / "ae_summary_baseline.rtf"
 BASE_CSV_OUTPUT_PATH = CSV_OUTPUT_DIR / "ae_summary_baseline.csv"
+GROUPED_ROW_HEADERS_RTF_OUTPUT_PATH = (
+    RTF_OUTPUT_DIR / "grouped_row_headers_vertical_merge.rtf"
+)
+GROUPED_ROW_HEADERS_CSV_OUTPUT_PATH = (
+    CSV_OUTPUT_DIR / "grouped_row_headers_vertical_merge.csv"
+)
 
 TREATMENTS = [
     TreatmentGroup(name="Placebo", n=60),
@@ -140,6 +146,69 @@ ROWS: list[tuple[str, dict[str, int | None]]] = [
             "Low Dose": 6,
             "High Dose": 7,
             "Total": 19,
+        },
+    ),
+]
+
+GROUPED_ROW_HEADER_ROWS: list[tuple[str, str, dict[str, int]]] = [
+    (
+        "Cardiac disorders",
+        "Any cardiac adverse event",
+        {
+            "Placebo": 7,
+            "Low Dose": 8,
+            "High Dose": 11,
+            "Total": 26,
+        },
+    ),
+    (
+        "",
+        "Tachycardia",
+        {
+            "Placebo": 3,
+            "Low Dose": 4,
+            "High Dose": 5,
+            "Total": 12,
+        },
+    ),
+    (
+        "",
+        "Bradycardia",
+        {
+            "Placebo": 2,
+            "Low Dose": 1,
+            "High Dose": 3,
+            "Total": 6,
+        },
+    ),
+    (
+        "Nervous system disorders",
+        "Any nervous system adverse event",
+        {
+            "Placebo": 11,
+            "Low Dose": 13,
+            "High Dose": 15,
+            "Total": 39,
+        },
+    ),
+    (
+        "",
+        "Headache",
+        {
+            "Placebo": 8,
+            "Low Dose": 9,
+            "High Dose": 10,
+            "Total": 27,
+        },
+    ),
+    (
+        "",
+        "Dizziness",
+        {
+            "Placebo": 4,
+            "Low Dose": 6,
+            "High Dose": 7,
+            "Total": 17,
         },
     ),
 ]
@@ -269,6 +338,97 @@ def build_expected_loader_table() -> pl.DataFrame:
     return pl.DataFrame(rows).select(column_names)
 
 
+def build_grouped_row_header_table() -> pl.DataFrame:
+    """Build grouped-row-header table data with two stub columns."""
+    rows: list[dict[str, str]] = []
+    for group_label, preferred_term, values in GROUPED_ROW_HEADER_ROWS:
+        row: dict[str, str] = {
+            "System Organ Class": group_label,
+            "Preferred Term": preferred_term,
+        }
+        for treatment in TREATMENTS:
+            count = values[treatment.name]
+            row[f"{treatment.name}_n"] = f"{count}"
+            row[f"{treatment.name}_pct"] = _format_percent(
+                count,
+                treatment.n,
+            )
+        rows.append(row)
+    return pl.DataFrame(rows)
+
+
+def _build_grouped_row_header_headers() -> list[RTFColumnHeader]:
+    """Build header rows for grouped-row-header table fixtures."""
+    group_labels = [f"{t.name} (N={t.n})" for t in TREATMENTS]
+    header_1 = RTFColumnHeader(
+        text=["System Organ Class", "Preferred Term", *group_labels],
+        col_rel_width=[2, 2, 2, 2, 2, 2],
+    )
+    header_2 = RTFColumnHeader(
+        text=[
+            "",
+            "",
+            "n",
+            "(%)",
+            "n",
+            "(%)",
+            "n",
+            "(%)",
+            "n",
+            "(%)",
+        ],
+        col_rel_width=[2, 2, 1, 1, 1, 1, 1, 1, 1, 1],
+        border_bottom=["single"] * 10,
+    )
+    return [header_1, header_2]
+
+
+def build_grouped_row_header_rtf(df: pl.DataFrame) -> RTFDocument:
+    """Create the grouped-row-header RTF document."""
+    return RTFDocument(
+        df=df,
+        rtf_title=RTFTitle(
+            text=[TITLE, SUBTITLE],
+            text_format=["b", ""],
+        ),
+        rtf_column_header=_build_grouped_row_header_headers(),
+        rtf_body=RTFBody(
+            col_rel_width=[2, 2, 1, 1, 1, 1, 1, 1, 1, 1],
+            text_justification=[
+                ["l", "l", "c", "c", "c", "c", "c", "c", "c", "c"],
+            ],
+        ),
+        rtf_footnote=RTFFootnote(text=FOOTNOTE),
+        rtf_source=RTFSource(text=SOURCE),
+    )
+
+
+def build_expected_grouped_row_header_loader_table() -> pl.DataFrame:
+    """Build expected loader output for grouped row headers."""
+    column_names = ["System Organ Class", "Preferred Term"]
+    for treatment in TREATMENTS:
+        group_name = f"{treatment.name} (N={treatment.n})"
+        column_names.append(f"{group_name} | n")
+        column_names.append(f"{group_name} | (%)")
+
+    rows: list[dict[str, str]] = []
+    for group_label, preferred_term, values in GROUPED_ROW_HEADER_ROWS:
+        row: dict[str, str] = {
+            "System Organ Class": group_label.strip(),
+            "Preferred Term": preferred_term.strip(),
+        }
+        for treatment in TREATMENTS:
+            count = values[treatment.name]
+            row[f"{treatment.name} (N={treatment.n}) | n"] = f"{count}"
+            row[f"{treatment.name} (N={treatment.n}) | (%)"] = _format_percent(
+                count,
+                treatment.n,
+            )
+        rows.append(row)
+
+    return pl.DataFrame(rows).select(column_names)
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class VariantSpec:
     """Describe one formatting variant fixture."""
@@ -374,18 +534,16 @@ def _insert_first_cell_modifier_before_label(
     if label_index == -1:
         raise ValueError(f"Unable to locate label: {label!r}")
 
-    marker = (
-        r"\clbrdrl\brdrs\brdrw15\clbrdrt\brdrw15\clbrdrb\brdrw15\clvertalt\cellx2455"
-    )
-    marker_index = text.rfind(marker, 0, label_index)
-    if marker_index == -1:
-        raise ValueError(f"Unable to locate first-cell marker before: {label!r}")
+    row_start = text.rfind(r"\trowd", 0, label_index)
+    if row_start == -1:
+        raise ValueError(f"Unable to locate row start before: {label!r}")
+
+    first_cell_boundary_index = text.find(r"\cellx", row_start, label_index)
+    if first_cell_boundary_index == -1:
+        raise ValueError(f"Unable to locate first-cell boundary before: {label!r}")
 
     return (
-        text[:marker_index]
-        + modifier
-        + text[marker_index : marker_index + len(marker)]
-        + text[marker_index + len(marker) :]
+        text[:first_cell_boundary_index] + modifier + text[first_cell_boundary_index:]
     )
 
 
@@ -609,6 +767,42 @@ def _rtf_row_terminator_plain_row(text: str) -> str:
     )
 
 
+def _rtf_grouped_row_headers_vertical_merge(text: str) -> str:
+    """Apply vertical merge controls to grouped first-stub cells."""
+    updated = text
+    updated = _insert_first_cell_modifier_before_label(
+        updated,
+        label=r"{\f0 Cardiac disorders}\cell",
+        modifier=r"\clvmgf",
+    )
+    updated = _insert_first_cell_modifier_before_label(
+        updated,
+        label=r"{\f0 Tachycardia}\cell",
+        modifier=r"\clvmrg",
+    )
+    updated = _insert_first_cell_modifier_before_label(
+        updated,
+        label=r"{\f0 Bradycardia}\cell",
+        modifier=r"\clvmrg",
+    )
+    updated = _insert_first_cell_modifier_before_label(
+        updated,
+        label=r"{\f0 Nervous system disorders}\cell",
+        modifier=r"\clvmgf",
+    )
+    updated = _insert_first_cell_modifier_before_label(
+        updated,
+        label=r"{\f0 Headache}\cell",
+        modifier=r"\clvmrg",
+    )
+    updated = _insert_first_cell_modifier_before_label(
+        updated,
+        label=r"{\f0 Dizziness}\cell",
+        modifier=r"\clvmrg",
+    )
+    return updated
+
+
 def _csv_unicode_expected(text: str) -> str:
     """Set expected Unicode output for the body-row marker."""
     return _replace_or_raise(
@@ -696,6 +890,29 @@ def _generate_variant_fixtures(base_rtf: str, base_csv: str) -> None:
         csv_path.write_text(csv_output, encoding="utf-8")
 
 
+def _generate_grouped_row_header_fixture() -> None:
+    """Generate grouped row-header RTF and CSV fixtures."""
+    grouped_df = build_grouped_row_header_table()
+    grouped_doc = build_grouped_row_header_rtf(grouped_df)
+
+    GROUPED_ROW_HEADERS_RTF_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    GROUPED_ROW_HEADERS_CSV_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    grouped_doc.write_rtf(GROUPED_ROW_HEADERS_RTF_OUTPUT_PATH)
+    grouped_rtf = GROUPED_ROW_HEADERS_RTF_OUTPUT_PATH.read_text(
+        encoding="utf-8",
+        errors="ignore",
+    )
+    grouped_rtf = _rtf_grouped_row_headers_vertical_merge(grouped_rtf)
+    GROUPED_ROW_HEADERS_RTF_OUTPUT_PATH.write_text(
+        _with_trailing_newline(grouped_rtf),
+        encoding="utf-8",
+    )
+
+    grouped_expected_df = build_expected_grouped_row_header_loader_table()
+    grouped_expected_df.write_csv(GROUPED_ROW_HEADERS_CSV_OUTPUT_PATH)
+
+
 def _with_trailing_newline(text: str) -> str:
     """Ensure text ends with exactly one newline."""
     return text.rstrip("\n") + "\n"
@@ -722,6 +939,7 @@ def main() -> None:
     base_rtf = BASE_RTF_OUTPUT_PATH.read_text(encoding="utf-8", errors="ignore")
     base_csv = BASE_CSV_OUTPUT_PATH.read_text(encoding="utf-8")
     _generate_variant_fixtures(base_rtf=base_rtf, base_csv=base_csv)
+    _generate_grouped_row_header_fixture()
 
 
 if __name__ == "__main__":
