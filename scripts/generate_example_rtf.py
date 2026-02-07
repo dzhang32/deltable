@@ -300,6 +300,13 @@ def _replace_n_or_raise(text: str, old: str, new: str, count: int) -> str:
     return updated
 
 
+def _replace_all_or_raise(text: str, old: str, new: str) -> str:
+    """Replace all occurrences of a required substring."""
+    if old not in text:
+        raise ValueError(f"Required text not found: {old!r}")
+    return text.replace(old, new)
+
+
 def _replace_first_row_block(text: str, replacement: str) -> str:
     """Replace the first header-row block."""
     pattern = re.compile(
@@ -310,6 +317,51 @@ def _replace_first_row_block(text: str, replacement: str) -> str:
     if match is None:
         raise ValueError("Unable to locate first row block.")
     return text[: match.start()] + replacement + text[match.end() :]
+
+
+def _extract_row_blocks(text: str, count: int) -> list[str]:
+    """Extract the first `count` row blocks from RTF text."""
+    pattern = re.compile(
+        r"\\trowd.*?\\intbl\\row\\pard",
+        flags=re.DOTALL,
+    )
+    matches = [match.group(0) for match in pattern.finditer(text)]
+    if len(matches) < count:
+        raise ValueError(f"Expected at least {count} row blocks.")
+    return matches[:count]
+
+
+def _insert_before_label_row(text: str, label: str, insertion: str) -> str:
+    """Insert RTF text immediately before the row containing a label."""
+    label_index = text.find(label)
+    if label_index == -1:
+        raise ValueError(f"Unable to locate label: {label!r}")
+
+    row_start = text.rfind(r"\trowd", 0, label_index)
+    if row_start == -1:
+        raise ValueError(f"Unable to locate row start before: {label!r}")
+
+    return text[:row_start] + insertion + text[row_start:]
+
+
+def _insert_csv_line_before(
+    text: str,
+    before_line_prefix: str,
+    insert_line: str,
+) -> str:
+    """Insert one CSV line before the first line with a matching prefix."""
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith(before_line_prefix):
+            lines.insert(index, insert_line)
+            break
+    else:
+        raise ValueError(f"Unable to locate CSV line prefix: {before_line_prefix!r}")
+
+    updated = "\n".join(lines)
+    if text.endswith("\n"):
+        updated += "\n"
+    return updated
 
 
 def _insert_first_cell_modifier_before_label(
@@ -406,13 +458,37 @@ def _rtf_horizontal_merge_spanner(text: str) -> str:
         "\n"
         r"\clbrdrl\brdrs\brdrw15\clbrdrt\brdrdb\brdrw15\clbrdrb\brdrw15\clvertalb\cellx2455"
         "\n"
-        r"\clmgf\clbrdrl\brdrs\brdrw15\clbrdrt\brdrdb\brdrw15\clbrdrb\brdrw15\clvertalb\cellx5727"
+        r"\clmgf\clbrdrl\brdrs\brdrw15\clbrdrt\brdrdb\brdrw15\clbrdrb\brdrw15\clvertalb\cellx3273"
+        "\n"
+        r"\clmrg\clbrdrl\brdrs\brdrw15\clbrdrt\brdrdb\brdrw15\clbrdrb\brdrw15\clvertalb\cellx4091"
+        "\n"
+        r"\clmgf\clbrdrl\brdrs\brdrw15\clbrdrt\brdrdb\brdrw15\clbrdrb\brdrw15\clvertalb\cellx4909"
+        "\n"
+        r"\clmrg\clbrdrl\brdrs\brdrw15\clbrdrt\brdrdb\brdrw15\clbrdrb\brdrw15\clvertalb\cellx5727"
+        "\n"
+        r"\clmgf\clbrdrl\brdrs\brdrw15\clbrdrt\brdrdb\brdrw15\clbrdrb\brdrw15\clvertalb\cellx6545"
+        "\n"
+        r"\clmrg\clbrdrl\brdrs\brdrw15\clbrdrt\brdrdb\brdrw15\clbrdrb\brdrw15\clvertalb\cellx7364"
+        "\n"
+        r"\clmgf\clbrdrl\brdrs\brdrw15\clbrdrt\brdrdb\brdrw15\clbrdrb\brdrw15\clvertalb\cellx8182"
         "\n"
         r"\clmrg\clbrdrl\brdrs\brdrw15\clbrdrt\brdrdb\brdrw15\clbrdrr\brdrs\brdrw15\clbrdrb\brdrw15\clvertalb\cellx9000"
         "\n"
         r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\qc\fs18{\f0 Category}\cell"
         "\n"
-        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\qc\fs18{\f0 Treatment Groups}\cell"
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\qc\fs18{\f0 Placebo (N=60)}\cell"
+        "\n"
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\qc\fs18{\f0 }\cell"
+        "\n"
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\qc\fs18{\f0 Low Dose (N=60)}\cell"
+        "\n"
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\qc\fs18{\f0 }\cell"
+        "\n"
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\qc\fs18{\f0 High Dose (N=60)}\cell"
+        "\n"
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\qc\fs18{\f0 }\cell"
+        "\n"
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\qc\fs18{\f0 Total (N=180)}\cell"
         "\n"
         r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\qc\fs18{\f0 }\cell"
         "\n"
@@ -439,16 +515,6 @@ def _rtf_vertical_merge_stub(text: str) -> str:
         label=r"{\f0   Moderate}\cell",
         modifier=r"\clvmrg",
     )
-    updated = _replace_or_raise(
-        updated,
-        r"{\f0   Mild}\cell",
-        r"{\f0 }\cell",
-    )
-    updated = _replace_or_raise(
-        updated,
-        r"{\f0   Moderate}\cell",
-        r"{\f0 }\cell",
-    )
     return updated
 
 
@@ -468,12 +534,96 @@ def _rtf_unicode_superscript(text: str) -> str:
     return updated
 
 
+def _rtf_pagination_repeated_headers(text: str) -> str:
+    """Insert a page break and repeated two-row header block mid-table."""
+    header_rows = _extract_row_blocks(text=text, count=2)
+    insertion = r"\page" + "\n" + "\n".join(header_rows) + "\n"
+    return _insert_before_label_row(
+        text=text,
+        label=r"{\f0 With serious adverse event}\cell",
+        insertion=insertion,
+    )
+
+
+def _build_group_header_row(*, merged_spanning: bool) -> str:
+    """Build a standalone group-header row with blank numeric cells."""
+    cell_boundaries = [
+        2455,
+        3273,
+        4091,
+        4909,
+        5727,
+        6545,
+        7364,
+        8182,
+        9000,
+    ]
+
+    lines = [r"\trowd\trgaph108\trleft0\trqc"]
+    for index, boundary in enumerate(cell_boundaries):
+        if merged_spanning and index == 1:
+            prefix = r"\clmgf"
+        elif merged_spanning and index > 1:
+            prefix = r"\clmrg"
+        else:
+            prefix = ""
+        lines.append(f"{prefix}\\cellx{boundary}")
+
+    lines.append(
+        r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\ql\fs18{\f0 System Organ Class}\cell"
+    )
+    if merged_spanning:
+        lines.append(r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\ql\fs18{\f0 }\cell")
+        lines.extend([r"\cell"] * 7)
+    else:
+        lines.extend([r"\cell"] * 8)
+
+    lines.append(r"\row")
+    return "\n".join(lines) + "\n"
+
+
+def _rtf_group_header_first_cell_bare_cells(text: str) -> str:
+    """Insert a standalone group-header row with bare blank cells."""
+    return _insert_before_label_row(
+        text=text,
+        label=r"{\f0 Worst severity}\cell",
+        insertion=_build_group_header_row(merged_spanning=False),
+    )
+
+
+def _rtf_group_header_merged_spanning(text: str) -> str:
+    """Insert a standalone merged-spanning group-header row."""
+    return _insert_before_label_row(
+        text=text,
+        label=r"{\f0 Worst severity}\cell",
+        insertion=_build_group_header_row(merged_spanning=True),
+    )
+
+
+def _rtf_row_terminator_plain_row(text: str) -> str:
+    """Replace standard row endings with plain `\\row` endings."""
+    return _replace_all_or_raise(
+        text,
+        old=r"\intbl\row\pard",
+        new=r"\row",
+    )
+
+
 def _csv_unicode_expected(text: str) -> str:
     """Set expected Unicode output for the body-row marker."""
     return _replace_or_raise(
         text,
         "With any adverse event,28,(46.7),32,(53.3),36,(60.0),96,(53.3)",
         "With any adverse event †,28,(46.7),32,(53.3),36,(60.0),96,(53.3)",
+    )
+
+
+def _csv_with_group_header_row(text: str) -> str:
+    """Insert expected standalone group-header row in CSV output."""
+    return _insert_csv_line_before(
+        text=text,
+        before_line_prefix="Worst severity,",
+        insert_line='System Organ Class,"","","","","","","",""',
     )
 
 
@@ -507,6 +657,26 @@ VARIANTS = [
         name="unicode_superscript_symbols",
         rtf_transform=_rtf_unicode_superscript,
         csv_transform=_csv_unicode_expected,
+    ),
+    VariantSpec(
+        name="pagination_repeated_headers",
+        rtf_transform=_rtf_pagination_repeated_headers,
+        csv_transform=_identity,
+    ),
+    VariantSpec(
+        name="group_header_first_cell_bare_cells",
+        rtf_transform=_rtf_group_header_first_cell_bare_cells,
+        csv_transform=_csv_with_group_header_row,
+    ),
+    VariantSpec(
+        name="group_header_merged_spanning",
+        rtf_transform=_rtf_group_header_merged_spanning,
+        csv_transform=_csv_with_group_header_row,
+    ),
+    VariantSpec(
+        name="row_terminator_plain_row",
+        rtf_transform=_rtf_row_terminator_plain_row,
+        csv_transform=_identity,
     ),
 ]
 

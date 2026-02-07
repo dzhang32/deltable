@@ -26,46 +26,25 @@ class VariantCase:
     """Represent one RTF formatting variant test case."""
 
     name: str
-    should_xfail: bool = False
-    xfail_reason: str | None = None
 
 
 VARIANT_CASES = [
     VariantCase(name="multiline_headers"),
     VariantCase(name="indented_group_rows"),
     VariantCase(name="repeating_header_row"),
-    VariantCase(
-        name="spanning_header_horizontal_merge",
-        should_xfail=True,
-        xfail_reason="Horizontal merged spanner headers are not yet supported.",
-    ),
-    VariantCase(
-        name="vertical_merge_stub_column",
-        should_xfail=True,
-        xfail_reason="Vertical merged first-column stubs are not yet supported.",
-    ),
-    VariantCase(
-        name="unicode_superscript_symbols",
-        should_xfail=True,
-        xfail_reason="Unicode and superscript text normalization is incomplete.",
-    ),
+    VariantCase(name="spanning_header_horizontal_merge"),
+    VariantCase(name="vertical_merge_stub_column"),
+    VariantCase(name="unicode_superscript_symbols"),
+    VariantCase(name="pagination_repeated_headers"),
+    VariantCase(name="group_header_first_cell_bare_cells"),
+    VariantCase(name="group_header_merged_spanning"),
+    VariantCase(name="row_terminator_plain_row"),
 ]
 
 
 def _variant_parameters() -> list[pytest.ParameterSet]:
-    """Build variant parameters with strict xfail markers."""
-    params: list[pytest.ParameterSet] = []
-    for case in VARIANT_CASES:
-        marks = []
-        if case.should_xfail:
-            marks.append(
-                pytest.mark.xfail(
-                    strict=True,
-                    reason=case.xfail_reason or "Known unsupported formatting variant.",
-                )
-            )
-        params.append(pytest.param(case, id=case.name, marks=marks))
-    return params
+    """Build variant parameters."""
+    return [pytest.param(case, id=case.name) for case in VARIANT_CASES]
 
 
 def test_load_rtf_table_returns_polars_dataframe(test_data_dir: Path) -> None:
@@ -112,3 +91,62 @@ def test_load_rtf_table_variant_matches_expected_csv(
     actual_dataframe = load_rtf_table(rtf_path)
 
     assert_frame_equal(actual_dataframe, expected_dataframe)
+
+
+def test_load_rtf_table_drops_pagination_repeated_header_rows(
+    test_data_dir: Path,
+) -> None:
+    """Drop repeated mid-table header rows introduced by pagination."""
+    rtf_path = test_data_dir / "rtf" / "pagination_repeated_headers.rtf"
+    dataframe = load_rtf_table(rtf_path)
+
+    rows = dataframe.to_dicts()
+    assert not any(
+        row["Category"] == ""
+        and row["Placebo (N=60) | n"] == "n"
+        and row["Placebo (N=60) | (%)"] == "(%)"
+        for row in rows
+    )
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "group_header_first_cell_bare_cells",
+        "group_header_merged_spanning",
+    ],
+)
+def test_load_rtf_table_keeps_standalone_group_header_rows(
+    test_data_dir: Path,
+    fixture_name: str,
+) -> None:
+    """Keep standalone group-header rows with blank numeric cells."""
+    rtf_path = test_data_dir / "rtf" / f"{fixture_name}.rtf"
+    dataframe = load_rtf_table(rtf_path)
+
+    group_rows = [
+        row for row in dataframe.to_dicts() if row["Category"] == "System Organ Class"
+    ]
+    assert len(group_rows) == 1
+    group_row = group_rows[0]
+
+    for column in EXPECTED_COLUMNS[1:]:
+        assert group_row[column] == ""
+
+
+def test_load_rtf_table_raises_on_inconsistent_body_row_width(tmp_path: Path) -> None:
+    """Raise an error when a non-header body row has inconsistent width."""
+    baseline_rtf_path = (
+        Path(__file__).parent / "data" / "rtf" / "ae_summary_baseline.rtf"
+    )
+    rtf_text = baseline_rtf_path.read_text(encoding="utf-8", errors="ignore")
+
+    value_cell = r"\pard\hyphpar0\sb15\sa15\fi0\li0\ri0\qc\fs18{\f0 96}\cell"
+    malformed_rtf_text = rtf_text.replace(value_cell, "", 1)
+    assert malformed_rtf_text != rtf_text
+
+    malformed_path = tmp_path / "inconsistent_width.rtf"
+    malformed_path.write_text(malformed_rtf_text, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="inconsistent row width"):
+        load_rtf_table(malformed_path)
