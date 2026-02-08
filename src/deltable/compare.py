@@ -20,7 +20,9 @@ class ComparisonResult:
     summary: str
 
 
-def compare_html_tables(left_path: Path, right_path: Path) -> ComparisonResult:
+def compare_html_tables(
+    left_html_path: Path, right_html_path: Path
+) -> ComparisonResult:
     """Compare table structure in two HTML files.
 
     Checks column layout, column types, row count, and row order.
@@ -39,11 +41,11 @@ def compare_html_tables(left_path: Path, right_path: Path) -> ComparisonResult:
         HtmlComparisonError: If a file does not exist or contains
             no parseable tables.
     """
-    _validate_file_exists(left_path)
-    _validate_file_exists(right_path)
+    _validate_file_exists(left_html_path)
+    _validate_file_exists(right_html_path)
 
-    left_tables = _read_html_tables(left_path)
-    right_tables = _read_html_tables(right_path)
+    left_tables = _read_html_tables(left_html_path)
+    right_tables = _read_html_tables(right_html_path)
 
     if len(left_tables) != len(right_tables):
         return ComparisonResult(
@@ -127,41 +129,27 @@ def _check_structure(
     if len(left) != len(right):
         return "row count mismatch"
 
-    left_c = _coerce_numeric_columns(left)
-    right_c = _coerce_numeric_columns(right)
+    left_typed = _coerce_numeric_columns(left)
+    right_typed = _coerce_numeric_columns(right)
 
-    left_numeric = set(left_c.select_dtypes(include="number").columns)
-    right_numeric = set(right_c.select_dtypes(include="number").columns)
-    if left_numeric != right_numeric:
+    left_cols_numeric = left_typed.select_dtypes(include="number").columns
+    right_cols_numeric = right_typed.select_dtypes(include="number").columns
+    if set(left_cols_numeric) != set(right_cols_numeric):
         return "column type mismatch"
 
-    str_cols = [c for c in left_c.columns if c not in left_numeric]
-    if not str_cols:
+    str_cols = [c for c in left_typed.columns if c not in left_cols_numeric]
+
+    left_cols_str = left_typed[str_cols].map(_normalize_text, na_action="ignore")
+    right_cols_str = right_typed[str_cols].map(_normalize_text, na_action="ignore")
+
+    if left_cols_str.equals(right_cols_str):
         return None
-
-    left_str = left_c[str_cols].map(_normalize_text)
-    right_str = right_c[str_cols].map(_normalize_text)
-
-    if left_str.equals(right_str):
-        return None
-
-    left_sorted = left_str.sort_values(by=str_cols).reset_index(drop=True)
-    right_sorted = right_str.sort_values(by=str_cols).reset_index(drop=True)
-
-    if left_sorted.equals(right_sorted):
-        return "row order differs"
 
     return "string content differs"
 
 
 def _coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Convert columns to numeric where possible.
-
-    First attempts direct conversion via ``pd.to_numeric``.  When
-    that fails, extracts the leading number from clinical table
-    formats like ``"5 (11.9)"`` and tries again.  A column is
-    reclassified as numeric when more than half its values convert
-    successfully.
 
     Args:
         df: DataFrame whose columns may contain numeric data
@@ -171,30 +159,35 @@ def _coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
         A copy of *df* with data columns converted to numeric
         dtype.
     """
-    result = df.copy()
-    for col in result.columns:
-        numeric = pd.to_numeric(result[col], errors="coerce")
-        if numeric.notna().mean() > 0.5:
-            result[col] = numeric
-            continue
-        stripped = result[col].astype(str).str.extract(
-            r"^\s*([\d.]+)",
-            expand=False,
+    df_typed = df.copy()
+    for col in df_typed.columns:
+        # Try to convert the column to numeric.
+        # Extract the leading number to account for 'n (%)' format.
+        stripped = (
+            df_typed[col]
+            .astype(str)
+            .str.extract(
+                r"^\s*([\d.]+)",
+                expand=False,
+            )
         )
         numeric = pd.to_numeric(stripped, errors="coerce")
+
         if numeric.notna().mean() > 0.5:
-            result[col] = numeric
-    return result
+            df_typed[col] = numeric
+
+    return df_typed
 
 
-def _normalize_text(value: object) -> str:
+def _normalize_text(value: str) -> str:
     """Collapse and strip whitespace for structural comparison.
 
     Args:
-        value: Any value; converted to str before normalizing.
+        value: Cell value from a string column.
 
     Returns:
-        The string with leading/trailing whitespace stripped and
-        internal runs of whitespace collapsed to a single space.
+        The string with leading/trailing whitespace stripped,
+        internal runs of whitespace collapsed to a single space,
+        and all characters lowercased.
     """
-    return " ".join(str(value).strip().split())
+    return " ".join(value.lower().strip().split())

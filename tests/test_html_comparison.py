@@ -35,9 +35,17 @@ def test_structure_match(left: str, right: str, test_data_dir: Path) -> None:
     ("left", "right", "expected_in_summary"),
     [
         ("baseline/ds_table.html", "variants/ds_table_minus_1_column.html", "column"),
-        ("baseline/ds_table.html", "variants/ds_table_swapped_rows.html", "row order"),
+        (
+            "baseline/ds_table.html",
+            "variants/ds_table_swapped_rows.html",
+            "string content",
+        ),
         ("baseline/ds_table.html", "baseline/lb_table.html", "table count"),
-        ("baseline/lb_table.html", "variants/lb_table_minus_1_table.html", "table count"),
+        (
+            "baseline/lb_table.html",
+            "variants/lb_table_minus_1_table.html",
+            "table count",
+        ),
     ],
     ids=[
         "column_removed",
