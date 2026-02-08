@@ -9,6 +9,7 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.13"
 dependencies = [
+    "click==8.2.1",
     "lxml==6.0.2",
     "pandas==3.0.0",
 ]
@@ -26,6 +27,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/deltable"]
+
+[project.scripts]
+deltable = "deltable.cli:cli"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
