@@ -1,24 +1,27 @@
 # deltable Agent Instructions
 
 ## Background
-`deltable` is a Python library for comparing tables between one `.rtf` file and another `.rtf` file in clinical trial report workflows.
+`deltable` is a Python library for clinical-report table comparison workflows. The current implementation is a two-step flow:
+1. Convert `.rtf` to `.html` using LibreOffice (`soffice`) via `convert_rtf_to_html`.
+2. Compare table structure across two HTML files via `compare_html_tables`.
 
-Current intended classification buckets:
-1. `identical`: structure and data are equivalent.
-2. `data_differences`: structure is equivalent and values differ.
-3. `structure_differences`: structural changes are present (for example missing columns, different grouping, or incompatible layout).
+Current implemented comparison outcomes:
+1. `structure_match=True`: table structures are equivalent under current rules.
+2. `structure_match=False`: a structural mismatch was detected, with a reason in `summary`.
 
 ## Output Contract
 Comparison output should include:
-- A category from the classification buckets above.
-- A short, human-readable summary string that explains the primary difference.
-- A returned dataclass instance for the comparison result.
+- A returned `ComparisonResult` dataclass instance.
+- A `structure_match: bool` field.
+- A short, human-readable `summary: str` that explains the primary outcome.
 
 ## Comparison Assumptions
-- Each `.rtf` contains exactly one table.
-- Style-only differences are ignored for classification.
-- When multiple differences apply, return the category representing the biggest difference.
-  Example: if both style and data differ, return `data_differences`.
+- Structural comparison currently runs on `.html` files.
+- Each file can contain one or more tables; table-count mismatches are failures.
+- Style-only differences are ignored by table parsing/comparison.
+- Numeric value differences are intentionally ignored for structural matching.
+- String comparisons normalize whitespace and case.
+- Row order matters for string columns.
 
 ## Repository Context
 - Source code: `src/deltable/`
@@ -47,24 +50,24 @@ Use `uv` for dependency and command management.
 
 Setup:
 ```bash
-uv venv --python 3.14
+uv venv --python 3.13
 source .venv/bin/activate
 uv pip install ".[dev]"
 ```
 
 Run tests:
 ```bash
-uv run pytest
+pytest
 ```
 
 Optional coverage:
 ```bash
-uv run pytest --cov
+pytest --cov
 ```
 
 Run pre-commit hooks:
 ```bash
-uv run pre-commit run --all-files
+pre-commit run --all-files
 ```
 
 ## Development Workflow
