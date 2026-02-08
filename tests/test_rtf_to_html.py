@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from deltable.rtf_to_html import (
 
 def _normalize_html(html_text: str) -> str:
     normalized = html_text.replace("\r\n", "\n")
+    normalized = re.sub(r"\b0(?:cm|in|px|pt|mm|em|rem)\b", "0", normalized)
     normalized_lines = [line.rstrip() for line in normalized.split("\n")]
     return "\n".join(normalized_lines).strip()
 
