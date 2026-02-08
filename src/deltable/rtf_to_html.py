@@ -6,12 +6,33 @@ from deltable.error import RtfToHtmlConversionError
 
 
 def is_soffice_available() -> bool:
-    """Return True when the `soffice` command is available on PATH."""
+    """Check whether the ``soffice`` command is available on PATH.
+
+    Returns:
+        True when ``soffice`` can be found, False otherwise.
+    """
     return shutil.which("soffice") is not None
 
 
 def convert_rtf_to_html(input_path: Path, output_dir: Path) -> Path:
-    """Convert one RTF file to HTML using LibreOffice's `soffice` CLI."""
+    """Convert one RTF file to HTML using LibreOffice's ``soffice`` CLI.
+
+    The generated HTML file is written to *output_dir* with the same
+    stem as *input_path* and an ``.html`` extension.
+
+    Args:
+        input_path: Path to the ``.rtf`` source file.
+        output_dir: Directory where the HTML output is written.
+            Created automatically if it does not exist.
+
+    Returns:
+        Path to the generated HTML file.
+
+    Raises:
+        RtfToHtmlConversionError: If ``soffice`` is unavailable,
+            the input file does not exist, has the wrong extension,
+            or the conversion process fails.
+    """
     if not is_soffice_available():
         raise RtfToHtmlConversionError(
             "soffice is not installed or not available on PATH.",
@@ -44,7 +65,9 @@ def convert_rtf_to_html(input_path: Path, output_dir: Path) -> Path:
     )
 
     if completed.returncode != 0:
-        raise RtfToHtmlConversionError(f"soffice failed with exit code {completed.returncode}.")
+        raise RtfToHtmlConversionError(
+            f"soffice failed with exit code {completed.returncode}."
+        )
 
     output_path = output_dir / f"{input_path.stem}.html"
 

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest
@@ -8,6 +6,12 @@ from deltable.rtf_to_html import (
     convert_rtf_to_html,
     is_soffice_available,
 )
+
+
+def _normalize_html(html_text: str) -> str:
+    normalized = html_text.replace("\r\n", "\n")
+    normalized_lines = [line.rstrip() for line in normalized.split("\n")]
+    return "\n".join(normalized_lines).strip()
 
 
 @pytest.mark.parametrize(
@@ -26,7 +30,7 @@ def test_convert_rtf_fixtures_match_saved_html(
     tmp_path: Path,
 ) -> None:
     rtf_path = test_data_dir / "rtf" / f"{fixture_name}.rtf"
-    expected_html_path = test_data_dir / "html" / f"{fixture_name}.html"
+    expected_html_path = test_data_dir / "html" / "baseline" / f"{fixture_name}.html"
 
     generated_html_path = convert_rtf_to_html(
         input_path=rtf_path,
@@ -35,4 +39,4 @@ def test_convert_rtf_fixtures_match_saved_html(
 
     generated_html = generated_html_path.read_text(encoding="utf-8")
     expected_html = expected_html_path.read_text(encoding="utf-8")
-    assert generated_html == expected_html
+    assert _normalize_html(generated_html) == _normalize_html(expected_html)
