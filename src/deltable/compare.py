@@ -123,6 +123,11 @@ def _check_structure(
         A short description of the structural mismatch, or None
         when the tables are structurally equivalent.
     """
+    left = left.copy()
+    right = right.copy()
+    left.columns = [_normalize_column_name(c) for c in left.columns]
+    right.columns = [_normalize_column_name(c) for c in right.columns]
+
     if list(left.columns) != list(right.columns):
         return "column mismatch"
 
@@ -177,6 +182,23 @@ def _coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
             df_typed[col] = numeric
 
     return df_typed
+
+
+def _normalize_column_name(col: object) -> str | tuple[str, ...]:
+    """Normalize a column name for comparison.
+
+    Handles both plain string columns and MultiIndex tuple columns
+    by applying ``_normalize_text`` to each component.
+
+    Args:
+        col: A column name, either a string or a tuple of strings.
+
+    Returns:
+        The normalized column name.
+    """
+    if isinstance(col, tuple):
+        return tuple(_normalize_text(str(c)) for c in col)
+    return _normalize_text(str(col))
 
 
 def _normalize_text(value: str) -> str:

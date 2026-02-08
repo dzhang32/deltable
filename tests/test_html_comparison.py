@@ -14,6 +14,8 @@ from deltable.error import HtmlComparisonError
         ("baseline/lb_table.html", "baseline/lb_table.html"),
         ("baseline/surv_table.html", "baseline/surv_table.html"),
         ("baseline/ds_table.html", "variants/ds_table_changed_values.html"),
+        ("baseline/ds_table.html", "variants/ds_table_heading_whitespace.html"),
+        ("baseline/ds_table.html", "variants/ds_table_row_whitespace.html"),
     ],
     ids=[
         "ds_identical",
@@ -21,6 +23,8 @@ from deltable.error import HtmlComparisonError
         "lb_identical",
         "surv_identical",
         "data_differences_ignored",
+        "heading_whitespace_normalised",
+        "row_whitespace_normalised",
     ],
 )
 def test_structure_match(left: str, right: str, test_data_dir: Path) -> None:
