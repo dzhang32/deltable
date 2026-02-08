@@ -1,19 +1,12 @@
-import re
 from pathlib import Path
 
 import pytest
 
+from deltable.compare import compare_html_tables
 from deltable.rtf_to_html import (
     convert_rtf_to_html,
     is_soffice_available,
 )
-
-
-def _normalize_html(html_text: str) -> str:
-    normalized = html_text.replace("\r\n", "\n")
-    normalized = re.sub(r"\b0(?:cm|in|px|pt|mm|em|rem)\b", "0", normalized)
-    normalized_lines = [line.rstrip() for line in normalized.split("\n")]
-    return "\n".join(normalized_lines).strip()
 
 
 @pytest.mark.parametrize(
@@ -39,6 +32,5 @@ def test_convert_rtf_fixtures_match_saved_html(
         output_dir=tmp_path,
     )
 
-    generated_html = generated_html_path.read_text(encoding="utf-8")
-    expected_html = expected_html_path.read_text(encoding="utf-8")
-    assert _normalize_html(generated_html) == _normalize_html(expected_html)
+    result = compare_html_tables(generated_html_path, expected_html_path)
+    assert result.structure_match, result.summary
